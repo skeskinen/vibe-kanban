@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   X,
   Image as ImageIcon,
@@ -48,8 +48,10 @@ export function ImageUploadSection({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = useCallback(
-    async (files: FileList | null) => {
+    async (files: FileList | File[] | null) => {
       if (!files || disabled) return;
+
+      const fileArray = Array.isArray(files) ? files : Array.from(files);
 
       setErrorMessage(null);
 
@@ -68,7 +70,7 @@ export function ImageUploadSection({
       const oversizedFiles: string[] = [];
       const validFiles: File[] = [];
 
-      Array.from(files).forEach((file) => {
+      fileArray.forEach((file) => {
         if (!VALID_TYPES.includes(file.type.toLowerCase())) {
           invalidFiles.push(file.name);
           return;
@@ -170,6 +172,41 @@ export function ImageUploadSection({
     return `${(kb / 1024).toFixed(1)} MB`;
   };
 
+  useEffect(() => {
+    if (readOnly) return;
+
+    const handlePasteEvent = (event: ClipboardEvent) => {
+      if (disabled || !event.clipboardData) {
+        return;
+      }
+
+      const items = Array.from(event.clipboardData.items).filter((item) =>
+        item.type.startsWith('image/')
+      );
+      const filesFromItems = items
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => Boolean(file));
+      const filesFromClipboard = Array.from(event.clipboardData.files ?? []).filter(
+        (file) => file.type.startsWith('image/')
+      );
+
+      const files = filesFromItems.length > 0 ? filesFromItems : filesFromClipboard;
+
+      if (files.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      void handleFileSelect(files);
+    };
+
+    window.addEventListener('paste', handlePasteEvent);
+
+    return () => {
+      window.removeEventListener('paste', handlePasteEvent);
+    };
+  }, [disabled, handleFileSelect, readOnly]);
+
   const content = (
     <div className={cn('space-y-3', className)}>
       {/* Error message */}
@@ -201,7 +238,7 @@ export function ImageUploadSection({
         >
           <Upload className="h-8 w-8 mx-auto mb-3 text-muted-foreground" />
           <p className="text-sm text-muted-foreground mb-1">
-            Drag and drop images here, or click to select
+            Drag, paste, or click to add images
           </p>
           <Button
             variant="secondary"
