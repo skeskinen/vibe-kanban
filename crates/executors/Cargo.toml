@@ -24,7 +24,6 @@ rust-embed = "8.2"
 directories = "6.0.0"
 command-group = { version = "5.0", features = ["with-tokio"] }
 regex = "1.11.1"
-sentry-tracing = { version = "0.41.0", features = ["backtrace"] }
 lazy_static = "1.4"
 json-patch = "2.0"
 thiserror = { workspace = true }

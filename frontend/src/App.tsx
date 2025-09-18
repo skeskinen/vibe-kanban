@@ -20,7 +20,6 @@ import { SearchProvider } from '@/contexts/search-context';
 
 import { ProjectProvider } from '@/contexts/project-context';
 import { ThemeMode } from 'shared/types';
-import * as Sentry from '@sentry/react';
 import { Loader } from '@/components/ui/loader';
 
 import { AppWithStyleOverride } from '@/utils/style-override';
@@ -28,8 +27,6 @@ import { WebviewContextMenu } from '@/vscode/ContextMenu';
 import { DevBanner } from '@/components/DevBanner';
 import NiceModal from '@ebay/nice-modal-react';
 import { OnboardingResult } from './components/dialogs/global/OnboardingDialog';
-
-const SentryRoutes = Sentry.withSentryReactRouterV6Routing(Routes);
 
 function AppContent() {
   const { config, updateAndSaveConfig, loading } = useUserSystem();
@@ -64,14 +61,6 @@ function AppContent() {
       await updateAndSaveConfig({ github_login_acknowledged: true });
     };
 
-    const handleTelemetryOptIn = async (analyticsEnabled: boolean) => {
-      if (cancelled) return;
-      await updateAndSaveConfig({
-        telemetry_acknowledged: true,
-        analytics_enabled: analyticsEnabled,
-      });
-    };
-
     const handleReleaseNotesClose = async () => {
       if (cancelled) return;
       await updateAndSaveConfig({ show_release_notes: false });
@@ -97,13 +86,6 @@ function AppContent() {
         await NiceModal.show('github-login');
         await handleGitHubLoginComplete();
         await NiceModal.hide('github-login');
-      }
-
-      if (!config.telemetry_acknowledged) {
-        const analyticsEnabled: boolean =
-          await NiceModal.show('privacy-opt-in');
-        await handleTelemetryOptIn(analyticsEnabled);
-        await NiceModal.hide('privacy-opt-in');
       }
 
       if (config.show_release_notes) {
@@ -144,7 +126,7 @@ function AppContent() {
             {showNavbar && <DevBanner />}
             {showNavbar && <Navbar />}
             <div className="flex-1 h-full overflow-y-scroll">
-              <SentryRoutes>
+              <Routes>
                 <Route path="/" element={<Projects />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/projects/:projectId" element={<Projects />} />
@@ -179,7 +161,7 @@ function AppContent() {
                   path="/mcp-servers"
                   element={<Navigate to="/settings/mcp" replace />}
                 />
-              </SentryRoutes>
+              </Routes>
             </div>
           </div>
         </SearchProvider>

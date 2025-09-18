@@ -14,9 +14,7 @@ use db::{
 use executors::executors::ExecutorError;
 use futures::{StreamExt, TryStreamExt};
 use git2::Error as Git2Error;
-use serde_json::Value;
 use services::services::{
-    analytics::AnalyticsService,
     auth::{AuthError, AuthService},
     config::{Config, ConfigError},
     container::{ContainerError, ContainerService},
@@ -27,7 +25,6 @@ use services::services::{
     git::{GitService, GitServiceError},
     image::{ImageError, ImageService},
     pr_monitor::PrMonitorService,
-    sentry::SentryService,
     worktree_manager::WorktreeError,
 };
 use sqlx::{Error as SqlxError, types::Uuid};
@@ -73,17 +70,11 @@ pub enum DeploymentError {
 pub trait Deployment: Clone + Send + Sync + 'static {
     async fn new() -> Result<Self, DeploymentError>;
 
-    fn user_id(&self) -> &str;
-
     fn shared_types() -> Vec<String>;
 
     fn config(&self) -> &Arc<RwLock<Config>>;
 
-    fn sentry(&self) -> &SentryService;
-
     fn db(&self) -> &DBService;
-
-    fn analytics(&self) -> &Option<AnalyticsService>;
 
     fn container(&self) -> &impl ContainerService;
 
@@ -101,32 +92,10 @@ pub trait Deployment: Clone + Send + Sync + 'static {
 
     fn file_search_cache(&self) -> &Arc<FileSearchCache>;
 
-    async fn update_sentry_scope(&self) -> Result<(), DeploymentError> {
-        let user_id = self.user_id();
-        let config = self.config().read().await;
-        let username = config.github.username.as_deref();
-        let email = config.github.primary_email.as_deref();
-
-        self.sentry().update_scope(user_id, username, email).await;
-
-        Ok(())
-    }
-
     async fn spawn_pr_monitor_service(&self) -> tokio::task::JoinHandle<()> {
         let db = self.db().clone();
         let config = self.config().clone();
         PrMonitorService::spawn(db, config).await
-    }
-
-    async fn track_if_analytics_allowed(&self, event_name: &str, properties: Value) {
-        let analytics_enabled = self.config().read().await.analytics_enabled;
-        // Only skip tracking if user explicitly opted out (Some(false))
-        // Send for None (undecided) and Some(true) (opted in)
-        if analytics_enabled != Some(false)
-            && let Some(analytics) = self.analytics()
-        {
-            analytics.track_event(self.user_id(), event_name, Some(properties.clone()));
-        }
     }
 
     /// Cleanup executions marked as running in the db, call at startup

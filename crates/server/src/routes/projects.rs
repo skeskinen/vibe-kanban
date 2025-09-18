@@ -149,22 +149,7 @@ pub async fn create_project(
     )
     .await
     {
-        Ok(project) => {
-            // Track project creation event
-            deployment
-                .track_if_analytics_allowed(
-                    "project_created",
-                    serde_json::json!({
-                        "project_id": project.id.to_string(),
-                        "use_existing_repo": use_existing_repo,
-                        "has_setup_script": project.setup_script.is_some(),
-                        "has_dev_script": project.dev_script.is_some(),
-                    }),
-                )
-                .await;
-
-            Ok(ResponseJson(ApiResponse::success(project)))
-        }
+        Ok(project) => Ok(ResponseJson(ApiResponse::success(project))),
         Err(e) => Err(ProjectError::CreateFailed(e.to_string()).into()),
     }
 }

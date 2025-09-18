@@ -36,9 +36,7 @@ use executors::{
 };
 use futures::{StreamExt, TryStreamExt, stream::select};
 use notify_debouncer_full::DebouncedEvent;
-use serde_json::json;
 use services::services::{
-    analytics::AnalyticsContext,
     config::Config,
     container::{ContainerError, ContainerRef, ContainerService},
     filesystem_watcher,
@@ -66,7 +64,6 @@ pub struct LocalContainerService {
     config: Arc<RwLock<Config>>,
     git: GitService,
     image_service: ImageService,
-    analytics: Option<AnalyticsContext>,
 }
 
 impl LocalContainerService {
@@ -76,7 +73,6 @@ impl LocalContainerService {
         config: Arc<RwLock<Config>>,
         git: GitService,
         image_service: ImageService,
-        analytics: Option<AnalyticsContext>,
     ) -> Self {
         let child_store = Arc::new(RwLock::new(HashMap::new()));
 
@@ -87,7 +83,6 @@ impl LocalContainerService {
             config,
             git,
             image_service,
-            analytics,
         }
     }
 
@@ -292,7 +287,6 @@ impl LocalContainerService {
         let db = self.db.clone();
         let config = self.config.clone();
         let container = self.clone();
-        let analytics = self.analytics.clone();
 
         tokio::spawn(async move {
             loop {
@@ -407,23 +401,6 @@ impl LocalContainerService {
                                     e
                                 );
                             }
-                        }
-
-                        // Fire event when CodingAgent execution has finished
-                        if config.read().await.analytics_enabled == Some(true)
-                            && matches!(
-                                &ctx.execution_process.run_reason,
-                                ExecutionProcessRunReason::CodingAgent
-                            )
-                            && let Some(analytics) = &analytics
-                        {
-                            analytics.analytics_service.track_event(&analytics.user_id, "task_attempt_finished", Some(json!({
-                                    "task_id": ctx.task.id.to_string(),
-                                    "project_id": ctx.task.project_id.to_string(),
-                                    "attempt_id": ctx.task_attempt.id.to_string(),
-                                    "execution_success": matches!(ctx.execution_process.status, ExecutionProcessStatus::Completed),
-                                    "exit_code": ctx.execution_process.exit_code,
-                                })));
                         }
                     }
 

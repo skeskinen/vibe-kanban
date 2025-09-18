@@ -172,20 +172,6 @@ pub async fn create_project_from_github(
     let project_id = Uuid::new_v4();
     match Project::create(&app_state.db_pool, &project_data, project_id).await {
         Ok(project) => {
-            // Track project creation event
-            app_state
-                .track_analytics_event(
-                    "project_created_from_github",
-                    Some(serde_json::json!({
-                        "project_id": project.id.to_string(),
-                        "repository_id": payload.repository_id,
-                        "clone_url": payload.clone_url,
-                        "has_setup_script": has_setup_script,
-                        "has_dev_script": has_dev_script,
-                    })),
-                )
-                .await;
-
             Ok(ResponseJson(ApiResponse::success(project)))
         }
         Err(e) => {

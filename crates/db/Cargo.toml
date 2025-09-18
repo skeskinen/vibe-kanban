@@ -20,5 +20,4 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 ts-rs = { workspace = true }
 async-trait = "0.1"
 regex = "1.11.1"
-sentry-tracing = { version = "0.41.0", features = ["backtrace"] }
 futures-util = "0.3"

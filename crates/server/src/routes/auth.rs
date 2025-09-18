@@ -1,9 +1,7 @@
 use axum::{
     Router,
-    extract::{Request, State},
-    http::StatusCode,
-    middleware::{Next, from_fn_with_state},
-    response::{Json as ResponseJson, Response},
+    extract::State,
+    response::Json as ResponseJson,
     routing::{get, post},
 };
 use deployment::Deployment;
@@ -18,15 +16,11 @@ use utils::response::ApiResponse;
 
 use crate::{DeploymentImpl, error::ApiError};
 
-pub fn router(deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
+pub fn router(_deployment: &DeploymentImpl) -> Router<DeploymentImpl> {
     Router::new()
         .route("/auth/github/device/start", post(device_start))
         .route("/auth/github/device/poll", post(device_poll))
         .route("/auth/github/check", get(github_check_token))
-        .layer(from_fn_with_state(
-            deployment.clone(),
-            sentry_user_context_middleware,
-        ))
 }
 
 /// POST /auth/github/device/start
@@ -82,14 +76,6 @@ async fn device_poll(
         config.github_login_acknowledged = true; // Also acknowledge the GitHub login step
         save_config_to_file(&config.clone(), &config_path).await?;
     }
-    let _ = deployment.update_sentry_scope().await;
-    let props = serde_json::json!({
-        "username": user_info.username,
-        "email": user_info.primary_email,
-    });
-    deployment
-        .track_if_analytics_allowed("$identify", props)
-        .await;
     Ok(ResponseJson(ApiResponse::success(
         DevicePollStatus::Success,
     )))
@@ -115,14 +101,4 @@ async fn github_check_token(
         ))),
         Err(e) => Err(e.into()),
     }
-}
-
-/// Middleware to set Sentry user context for every request
-pub async fn sentry_user_context_middleware(
-    State(deployment): State<DeploymentImpl>,
-    req: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let _ = deployment.update_sentry_scope().await;
-    Ok(next.run(req).await)
 }

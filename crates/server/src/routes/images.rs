@@ -63,17 +63,6 @@ pub async fn upload_image(
             let data = field.bytes().await?;
             let image = image_service.store_image(&data, &filename).await?;
 
-            deployment
-                .track_if_analytics_allowed(
-                    "image_uploaded",
-                    serde_json::json!({
-                        "image_id": image.id.to_string(),
-                        "size_bytes": image.size_bytes,
-                        "mime_type": image.mime_type,
-                    }),
-                )
-                .await;
-
             let image_response = ImageResponse::from_image(image);
             return Ok(ResponseJson(ApiResponse::success(image_response)));
         }

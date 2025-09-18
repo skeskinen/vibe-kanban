@@ -24,7 +24,6 @@ declare module '@ebay/nice-modal-react' {
     // App flow modals
     disclaimer: void;
     onboarding: void;
-    'privacy-opt-in': void;
     'provide-pat': ProvidePatDialogProps;
     'release-notes': void;
 

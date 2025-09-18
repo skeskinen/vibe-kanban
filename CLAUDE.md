@@ -120,7 +120,6 @@ shared/types.ts    # Auto-generated TypeScript types from Rust
 
 Build-time (set when building):
 - `GITHUB_CLIENT_ID`: GitHub OAuth app ID (default: Bloop AI's app)
-- `POSTHOG_API_KEY`: Analytics key (optional)
 
 Runtime:
 - `BACKEND_PORT`: Backend server port (default: auto-assign)

@@ -100,71 +100,15 @@ async fn update_config(
 ) -> ResponseJson<ApiResponse<Config>> {
     let config_path = config_path();
 
-    // Get old config state before updating
-    let old_config = deployment.config().read().await.clone();
-
     match save_config_to_file(&new_config, &config_path).await {
         Ok(_) => {
             let mut config = deployment.config().write().await;
             *config = new_config.clone();
             drop(config);
 
-            // Track config events when fields transition from false → true
-            track_config_events(&deployment, &old_config, &new_config).await;
-
             ResponseJson(ApiResponse::success(new_config))
         }
         Err(e) => ResponseJson(ApiResponse::error(&format!("Failed to save config: {}", e))),
-    }
-}
-
-/// Track config events when fields transition from false → true
-async fn track_config_events(deployment: &DeploymentImpl, old: &Config, new: &Config) {
-    let events = [
-        (
-            !old.disclaimer_acknowledged && new.disclaimer_acknowledged,
-            "onboarding_disclaimer_accepted",
-            serde_json::json!({}),
-        ),
-        (
-            !old.onboarding_acknowledged && new.onboarding_acknowledged,
-            "onboarding_completed",
-            serde_json::json!({
-                "profile": new.executor_profile,
-                "editor": new.editor
-            }),
-        ),
-        (
-            !old.github_login_acknowledged && new.github_login_acknowledged,
-            "onboarding_github_login_completed",
-            serde_json::json!({
-                "username": new.github.username,
-                "email": new.github.primary_email,
-                "auth_method": if new.github.oauth_token.is_some() { "oauth" }
-                              else if new.github.pat.is_some() { "pat" }
-                              else { "none" },
-                "has_default_pr_base": new.github.default_pr_base.is_some(),
-                "skipped": new.github.username.is_none()
-            }),
-        ),
-        (
-            !old.telemetry_acknowledged && new.telemetry_acknowledged,
-            "onboarding_telemetry_choice",
-            serde_json::json!({}),
-        ),
-        (
-            !old.analytics_enabled.unwrap_or(false) && new.analytics_enabled.unwrap_or(false),
-            "analytics_session_start",
-            serde_json::json!({}),
-        ),
-    ];
-
-    for (should_track, event_name, properties) in events {
-        if should_track {
-            deployment
-                .track_if_analytics_allowed(event_name, properties)
-                .await;
-        }
     }
 }
 

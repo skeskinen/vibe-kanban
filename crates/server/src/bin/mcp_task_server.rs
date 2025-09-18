@@ -4,25 +4,9 @@ use rmcp::{ServiceExt, transport::stdio};
 use server::mcp::task_server::TaskServer;
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use tracing_subscriber::{EnvFilter, prelude::*};
-use utils::{assets::asset_dir, sentry::sentry_layer};
+use utils::assets::asset_dir;
 
 fn main() -> anyhow::Result<()> {
-    let environment = if cfg!(debug_assertions) {
-        "dev"
-    } else {
-        "production"
-    };
-    let _guard = sentry::init((
-        "https://1065a1d276a581316999a07d5dffee26@o4509603705192449.ingest.de.sentry.io/4509605576441937",
-        sentry::ClientOptions {
-            release: sentry::release_name!(),
-            environment: Some(environment.into()),
-            ..Default::default()
-        },
-    ));
-    sentry::configure_scope(|scope| {
-        scope.set_tag("source", "mcp");
-    });
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -34,7 +18,6 @@ fn main() -> anyhow::Result<()> {
                         .with_writer(std::io::stderr)
                         .with_filter(EnvFilter::new("debug")),
                 )
-                .with(sentry_layer())
                 .init();
 
             let version = env!("CARGO_PKG_VERSION");
@@ -54,7 +37,6 @@ fn main() -> anyhow::Result<()> {
                 .await
                 .inspect_err(|e| {
                     tracing::error!("serving error: {:?}", e);
-                    sentry::capture_error(e);
                 })?;
 
             service.waiting().await?;

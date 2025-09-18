@@ -1,9 +1,8 @@
 use axum::{
     body::Body,
-    http::HeaderValue,
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
-use reqwest::{StatusCode, header};
 use rust_embed::RustEmbed;
 
 #[derive(RustEmbed)]

@@ -153,18 +153,6 @@ pub async fn create_task_attempt(
         .start_attempt(&task_attempt, executor_profile_id.clone())
         .await?;
 
-    deployment
-        .track_if_analytics_allowed(
-            "task_attempt_started",
-            serde_json::json!({
-                "task_id": task_attempt.task_id.to_string(),
-                "variant": &executor_profile_id.variant,
-                "executor": &executor_profile_id.executor,
-                "attempt_id": task_attempt.id.to_string(),
-            }),
-        )
-        .await;
-
     tracing::info!("Started execution process {}", execution_process.id);
 
     Ok(ResponseJson(ApiResponse::success(task_attempt)))
@@ -1060,17 +1048,6 @@ pub async fn merge_task_attempt(
     .await?;
     Task::update_status(pool, ctx.task.id, TaskStatus::Done).await?;
 
-    deployment
-        .track_if_analytics_allowed(
-            "task_attempt_merged",
-            serde_json::json!({
-                "task_id": ctx.task.id.to_string(),
-                "project_id": ctx.project.id.to_string(),
-                "attempt_id": task_attempt.id.to_string(),
-            }),
-        )
-        .await;
-
     Ok(ResponseJson(ApiResponse::success(())))
 }
 
@@ -1222,17 +1199,6 @@ pub async fn create_github_pr(
             {
                 tracing::error!("Failed to update task attempt PR status: {}", e);
             }
-
-            deployment
-                .track_if_analytics_allowed(
-                    "github_pr_created",
-                    serde_json::json!({
-                        "task_id": task.id.to_string(),
-                        "project_id": project.id.to_string(),
-                        "attempt_id": task_attempt.id.to_string(),
-                    }),
-                )
-                .await;
 
             Ok(ResponseJson(ApiResponse::success(pr_info.url)))
         }
