@@ -343,14 +343,7 @@ impl FileSearchCache {
         for result in walker {
             let entry = match result {
                 Ok(entry) => entry,
-                Err(err) => {
-                    let err_path = err.path().map(|p| p.to_path_buf());
-                    warn!(
-                        path = ?err_path,
-                        "Skipping path while building file index for {:?}: {}",
-                        repo_path,
-                        err
-                    );
+                Err(_err) => {
                     continue;
                 }
             };
@@ -363,13 +356,7 @@ impl FileSearchCache {
 
             let relative_path = match path.strip_prefix(repo_path) {
                 Ok(relative) => relative,
-                Err(err) => {
-                    warn!(
-                        path = ?path,
-                        "Skipping path outside repo while building file index for {:?}: {}",
-                        repo_path,
-                        err
-                    );
+                Err(_err) => {
                     continue;
                 }
             };
