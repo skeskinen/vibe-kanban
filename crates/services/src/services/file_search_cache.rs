@@ -341,14 +341,39 @@ impl FileSearchCache {
 
         // Now walk all files and determine their ignore status
         for result in walker {
-            let entry = result?;
+            let entry = match result {
+                Ok(entry) => entry,
+                Err(err) => {
+                    let err_path = err.path().map(|p| p.to_path_buf());
+                    warn!(
+                        path = ?err_path,
+                        "Skipping path while building file index for {:?}: {}",
+                        repo_path,
+                        err
+                    );
+                    continue;
+                }
+            };
+
             let path = entry.path();
 
             if path == repo_path {
                 continue;
             }
 
-            let relative_path = path.strip_prefix(repo_path)?;
+            let relative_path = match path.strip_prefix(repo_path) {
+                Ok(relative) => relative,
+                Err(err) => {
+                    warn!(
+                        path = ?path,
+                        "Skipping path outside repo while building file index for {:?}: {}",
+                        repo_path,
+                        err
+                    );
+                    continue;
+                }
+            };
+
             let relative_path_str = relative_path.to_string_lossy().to_string();
             let relative_path_lower = relative_path_str.to_lowercase();
 
