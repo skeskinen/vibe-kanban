@@ -1,21 +1,82 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    fs,
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use futures::StreamExt;
 use regex::Regex;
+use tokio::time::{Instant, interval};
+use tracing::{info, trace};
 use utils::msg_store::MsgStore;
 
 /// Handles session management for Codex
 pub struct SessionHandler;
 
+const FALLBACK_POLL_INTERVAL_MS: u64 = 250;
+const FALLBACK_TIMEOUT_SECS: u64 = 15;
+const FALLBACK_RECENT_WINDOW_SECS: u64 = 10;
+
 impl SessionHandler {
     /// Start monitoring stderr lines for session ID extraction
-    pub fn start_session_id_extraction(msg_store: Arc<MsgStore>) {
+    pub fn start_session_id_extraction(msg_store: Arc<MsgStore>, current_dir: PathBuf) {
+        let session_found = Arc::new(AtomicBool::new(false));
+
+        let stderr_store = msg_store.clone();
+        let stderr_flag = session_found.clone();
         tokio::spawn(async move {
-            let mut stderr_lines_stream = msg_store.stderr_lines_stream();
+            let mut stderr_lines_stream = stderr_store.stderr_lines_stream();
 
             while let Some(Ok(line)) = stderr_lines_stream.next().await {
                 if let Some(session_id) = Self::extract_session_id_from_line(&line) {
-                    msg_store.push_session_id(session_id);
+                    if !stderr_flag.swap(true, Ordering::SeqCst) {
+                        info!("Captured Codex session id from stderr");
+                        stderr_store.push_session_id(session_id);
+                    }
+                    break;
+                }
+            }
+        });
+
+        tokio::spawn({
+            let fallback_store = msg_store;
+            let fallback_flag = session_found;
+            async move {
+                let poll_interval = Duration::from_millis(FALLBACK_POLL_INTERVAL_MS);
+                let max_duration = Duration::from_secs(FALLBACK_TIMEOUT_SECS);
+                let search_started_at = SystemTime::now();
+                let deadline = Instant::now() + max_duration;
+                let mut ticker = interval(poll_interval);
+
+                loop {
+                    ticker.tick().await;
+
+                    if fallback_flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    if Instant::now() >= deadline {
+                        trace!("Fallback session lookup deadline reached without match");
+                        break;
+                    }
+
+                    if let Some(session_id) =
+                        Self::find_session_id_via_rollouts(&current_dir, search_started_at)
+                    {
+                        if !fallback_flag.swap(true, Ordering::SeqCst) {
+                            info!(
+                                "Resolved Codex session id via rollout fallback: {}",
+                                session_id
+                            );
+                            fallback_store.push_session_id(session_id);
+                        }
+                        break;
+                    }
                 }
             }
         });
@@ -34,6 +95,229 @@ impl SessionHandler {
             .captures(line)
             .and_then(|cap| cap.name("id"))
             .map(|m| m.as_str().to_string())
+    }
+
+    fn find_session_id_via_rollouts(
+        current_dir: &Path,
+        search_started_at: SystemTime,
+    ) -> Option<String> {
+        let home_dir = dirs::home_dir()?;
+        let sessions_dir = home_dir.join(".codex").join("sessions");
+
+        if !sessions_dir.exists() {
+            trace!(
+                "Codex sessions directory not found at {}",
+                sessions_dir.display()
+            );
+            return None;
+        }
+
+        Self::find_session_id_in_dir(&sessions_dir, current_dir, search_started_at)
+    }
+
+    fn find_session_id_in_dir(
+        sessions_dir: &Path,
+        current_dir: &Path,
+        search_started_at: SystemTime,
+    ) -> Option<String> {
+        let files = Self::collect_session_files(sessions_dir);
+        if files.is_empty() {
+            trace!(
+                "No Codex session files present in {}",
+                sessions_dir.display()
+            );
+            return None;
+        }
+
+        let search_started_ms = search_started_at
+            .duration_since(UNIX_EPOCH)
+            .ok()
+            .map(|duration| duration.as_millis() as u128)
+            .unwrap_or(0);
+        let fallback_cutoff_ms =
+            search_started_ms.saturating_sub((FALLBACK_RECENT_WINDOW_SECS as u128) * 1_000);
+
+        let mut fallback_candidate: Option<(String, u128)> = None;
+
+        for (path, mtime_ms) in files {
+            let (session_id, session_cwd) = match Self::read_session_meta(&path) {
+                Some(meta) => meta,
+                None => continue,
+            };
+
+            if !Self::is_valid_uuid(&session_id) {
+                continue;
+            }
+
+            if let Some(session_cwd) = session_cwd {
+                if Self::path_str_equivalent(&session_cwd, current_dir) {
+                    info!(
+                        "Matched Codex session id from {} to cwd {}",
+                        path.display(),
+                        session_cwd
+                    );
+                    return Some(session_id);
+                }
+            }
+
+            if fallback_candidate.is_none() && mtime_ms >= fallback_cutoff_ms {
+                fallback_candidate = Some((session_id, mtime_ms));
+            }
+        }
+
+        if let Some((session_id, _)) = fallback_candidate {
+            info!(
+                "Using fallback Codex session id {} from most recent rollout",
+                session_id
+            );
+            return Some(session_id);
+        }
+
+        None
+    }
+
+    fn collect_session_files(root: &Path) -> Vec<(PathBuf, u128)> {
+        let mut result = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+
+        while let Some(dir) = stack.pop() {
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(err) => {
+                    trace!(
+                        "Failed to read Codex session dir {}: {}",
+                        dir.display(),
+                        err
+                    );
+                    continue;
+                }
+            };
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+
+                let is_jsonl = path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.eq_ignore_ascii_case("jsonl"))
+                    .unwrap_or(false);
+                if !is_jsonl {
+                    continue;
+                }
+
+                let mtime_ms = fs::metadata(&path)
+                    .and_then(|meta| meta.modified())
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_millis() as u128)
+                    .unwrap_or(0);
+
+                result.push((path, mtime_ms));
+            }
+        }
+
+        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result
+    }
+
+    fn read_session_meta(path: &Path) -> Option<(String, Option<String>)> {
+        let file = fs::File::open(path).ok()?;
+        let mut reader = BufReader::new(file);
+        let mut first_line = String::new();
+        reader.read_line(&mut first_line).ok()?;
+        let first_line = first_line.trim();
+        if first_line.is_empty() {
+            return None;
+        }
+
+        let json: serde_json::Value = serde_json::from_str(first_line).ok()?;
+        let session_id = json
+            .get("payload")
+            .and_then(|payload| payload.get("id"))
+            .and_then(|value| value.as_str())
+            .or_else(|| json.get("id").and_then(|value| value.as_str()))?
+            .to_string();
+
+        let cwd = json
+            .get("payload")
+            .and_then(|payload| payload.get("cwd"))
+            .and_then(|value| value.as_str())
+            .or_else(|| json.get("cwd").and_then(|value| value.as_str()))
+            .map(|value| value.to_string());
+
+        Some((session_id, cwd))
+    }
+
+    fn is_valid_uuid(candidate: &str) -> bool {
+        uuid::Uuid::parse_str(candidate).is_ok()
+    }
+
+    fn normalize_path(path: &Path) -> String {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        Self::normalize_string(&canonical.to_string_lossy())
+    }
+
+    fn normalize_string<S: AsRef<str>>(input: S) -> String {
+        let mut value = input.as_ref().replace('\\', "/");
+        if value.is_empty() {
+            return value;
+        }
+
+        if cfg!(target_os = "windows") {
+            value = value.to_lowercase();
+        }
+
+        if value.len() > 1 {
+            value = value.trim_end_matches('/').to_string();
+            if value.is_empty() {
+                value = "/".to_string();
+            }
+        }
+
+        value
+    }
+
+    fn strip_private_prefix(value: &str) -> Option<String> {
+        if cfg!(target_os = "macos") && value.starts_with("/private/") {
+            let stripped = &value["/private/".len()..];
+            if stripped.is_empty() {
+                Some("/".to_string())
+            } else {
+                Some(format!("/{}", stripped.trim_start_matches('/')))
+            }
+        } else {
+            None
+        }
+    }
+
+    fn paths_str_equivalent(left: &str, right: &str) -> bool {
+        if left == right {
+            return true;
+        }
+
+        if let Some(stripped) = Self::strip_private_prefix(left) {
+            if stripped == right {
+                return true;
+            }
+        }
+
+        if let Some(stripped) = Self::strip_private_prefix(right) {
+            if stripped == left {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn path_str_equivalent(left: &str, right: &Path) -> bool {
+        let left_norm = Self::normalize_string(left);
+        let right_norm = Self::normalize_path(right);
+        Self::paths_str_equivalent(&left_norm, &right_norm)
     }
 
     /// Find codex rollout file path for given session_id. Used during follow-up execution.

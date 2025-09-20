@@ -220,10 +220,10 @@ impl StandardCodingAgentExecutor for Codex {
         let entry_index_provider = EntryIndexProvider::start_from(&msg_store);
 
         // Process stderr logs for session extraction only (errors come through JSONL)
-        SessionHandler::start_session_id_extraction(msg_store.clone());
+        let current_dir = current_dir.to_path_buf();
+        SessionHandler::start_session_id_extraction(msg_store.clone(), current_dir.clone());
 
         // Process stdout logs (Codex's JSONL output)
-        let current_dir = current_dir.to_path_buf();
         tokio::spawn(async move {
             let mut stream = msg_store.stdout_lines_stream();
             use std::collections::HashMap;
